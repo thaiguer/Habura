@@ -108,7 +108,7 @@ app.MapGet("/weatherforecast", () =>
     var forecast =  Enumerable.Range(1, 5).Select(index =>
         new WeatherForecast
         (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
+            DateOnly.FromDateTime(DateTime.UtcNow.AddDays(index)),
             Random.Shared.Next(-20, 55),
             summaries[Random.Shared.Next(summaries.Length)]
         ))
@@ -124,18 +124,26 @@ app.MapGet("/health", async (IServiceProvider services) =>
     var env = app.Environment.EnvironmentName;
     var now = DateTimeOffset.UtcNow;
     var uptime = now - startedAt;
+    var startedAtIso = startedAt.UtcDateTime.ToString("o");
+    var startedAtHourUtc = startedAt.UtcDateTime.Hour; // 0-23 UTC hour
+
+    int years = (int)(uptime.TotalDays / 365);
+    int days = (int)(uptime.TotalDays % 365);
+    int hours = uptime.Hours;
+    int minutes = uptime.Minutes;
+    int seconds = uptime.Seconds;
+    var runningFor = $"running for {years} years and {days} days and {hours} hours and {minutes} minutes and {seconds} seconds";
 
     var health = new
     {
         status = "Healthy",
-        startedAt = startedAt,
-        uptime = new { totalSeconds = (long)uptime.TotalSeconds, human = uptime.ToString() },
+        startedAt = startedAtIso,
+        startedAtHourUtc,
+        uptime = new { totalSeconds = (long)uptime.TotalSeconds, runningFor },
         environment = env,
-        framework = RuntimeInformation.FrameworkDescription,
         database = new { canConnect = false, users = 0 },
         hardware = new
         {
-            process = new { },
             disks = Array.Empty<object>()
         }
     };
@@ -153,35 +161,26 @@ app.MapGet("/health", async (IServiceProvider services) =>
                 users = await db.Users.CountAsync();
             }
 
-            // process memory
-            var process = Process.GetCurrentProcess();
-            var processMemory = new
-            {
-                workingSet = process.WorkingSet64,
-                privateBytes = process.PrivateMemorySize64,
-                gcTotalMemory = GC.GetTotalMemory(false)
-            };
-
-            // disk info (cross-platform)
+            // disk info (cross-platform) - sizes reported in GB (integer, no decimals)
             var drives = DriveInfo.GetDrives()
                 .Where(d => d.IsReady)
                 .Select(d => new
                 {
                     name = d.Name,
-                    totalBytes = d.TotalSize,
-                    availableBytes = d.AvailableFreeSpace
+                    totalGB = (long)(d.TotalSize / (1024L * 1024L * 1024L)),
+                    availableGB = (long)(d.AvailableFreeSpace / (1024L * 1024L * 1024L))
                 });
 
             return Results.Ok(new
             {
                 status = "Healthy",
-                startedAt,
-                uptime = new { totalSeconds = (long)uptime.TotalSeconds, human = uptime.ToString() },
+                startedAt = startedAtIso,
+                startedAtHourUtc,
+                uptime = new { totalSeconds = (long)uptime.TotalSeconds, runningFor },
                 environment = env,
-                framework = RuntimeInformation.FrameworkDescription,
+                // framework removed per request
                 database = new { canConnect, users },
                 hardware = new {
-                    process = processMemory,
                     disks = drives
                 }
             });
